@@ -12,7 +12,7 @@
 //        index.json                  有哪些日期、每天的来源/窗口/段位/行数、生成时间（画 30 天曲线时先拉它）
 //      日期用北京自然日；同一天重复跑会和当天已有文件合并（同键覆盖），不会产生第二份。
 //
-// 这个文件被复制到公开数据仓 aifyus/wxq-data 的 collector/ 下独立运行，所以它只许依赖
+// 这个文件被复制到公开数据仓 gtoxai/wxq-data 的 collector/ 下独立运行，所以它只许依赖
 // sync/sources/{types,index,wxq666}.ts 和 tsx，不许 import 本仓其它东西。改动请两边同步。
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'

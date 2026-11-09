@@ -1,7 +1,7 @@
 # wxq-data · 王者万象棋公共统计快照
 
 每天自动收集一次「王者万象棋」（万象大赛）王者段位的棋手榜与阵容榜，把当天的原始快照提交进本仓。
-供 [wxq-helper](https://github.com/aifyus) 对局助手（本地应用，代码不公开）直接拉取；任何人也可以拉。
+供 [wxq-helper](https://github.com/gtoxai) 对局助手（本地应用，代码不公开）直接拉取；任何人也可以拉。
 
 - **更新时间**：每天北京时间 06:00 左右（GitHub Actions 定时任务，UTC 22:00）。
 - **来源**：[wxq666.top](https://wxq666.top) 的公开接口（`/api/v1/meta`、`/lords`、`/lineups`）。
@@ -56,9 +56,9 @@ collector/                   收集器（运行副本；源码在 wxq-helper 的
 直接用 GitHub 的原始文件地址：
 
 ```
-https://raw.githubusercontent.com/aifyus/wxq-data/main/latest.json
-https://raw.githubusercontent.com/aifyus/wxq-data/main/index.json
-https://raw.githubusercontent.com/aifyus/wxq-data/main/snapshots/2026-11-10.json
+https://raw.githubusercontent.com/gtoxai/wxq-data/main/latest.json
+https://raw.githubusercontent.com/gtoxai/wxq-data/main/index.json
+https://raw.githubusercontent.com/gtoxai/wxq-data/main/snapshots/2026-11-10.json
 ```
 
 画多天曲线：先拉 `index.json` 看有哪些日期，再按需拉 `snapshots/` 下对应日期的文件；同一天的文件内容只在当天会变，过了那天就不会再改，可以放心按日期缓存。
