@@ -1,0 +1,26 @@
+{
+  "generatedAt": "2026-11-09T17:01:01.473Z",
+  "latest": "2026-11-10",
+  "days": [
+    {
+      "date": "2026-11-10",
+      "generatedAt": "2026-11-09T17:01:01.473Z",
+      "sources": [
+        "wxq666"
+      ],
+      "windows": [
+        1,
+        3,
+        7
+      ],
+      "segments": [
+        "king-1000",
+        "king-5000"
+      ],
+      "snapshots": 6,
+      "rows": 126,
+      "lineups": 247,
+      "file": "snapshots/2026-11-10.json"
+    }
+  ]
+}
