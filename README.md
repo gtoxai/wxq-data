@@ -38,6 +38,8 @@ collector/                   收集器（运行副本；源码在 wxq-helper 的
 ```
 
 百分比字段统一换成 0–1 的小数；来源没有「场次」字段，`count` 为 `null`。
+
+`stats` 里 `kind: "hero"` 的英雄行和 `lineups[].members` 阵容成员**不是来源的原始数据**：站上没有英雄榜接口，它们是从「棋手 × 阵容」详情里的棋子出场率按份额加权汇总出来的（英雄行的 `raw.derivedFrom` 标了 `lord-lineup-details`），所以只有抓了详情的 7 天窗口才有，1 / 3 天窗口没有。算法见 `collector/sync/sources/wxq666.ts` 顶部说明。
 完整类型定义见 `collector/sync/sources/types.ts`。
 
 ### `latest-details.json` / `snapshots/*.details.json` 的形状

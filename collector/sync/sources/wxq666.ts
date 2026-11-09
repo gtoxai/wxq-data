@@ -18,6 +18,12 @@
 //   GET /api/v1/lords/<lordKey>/lineups/<lineupKey>?days=&segment=  → 详情（成员出场率、核心、成型回合、对阵、天赋），
 //       只对 detailWindows（默认 [7]）里的窗口抓：一个窗口 155 个请求、原始单条 73KB，全窗口全量存不起（见 types.ts 的说明）。
 //   详情单条失败不毁整天：跳过、记进 Snapshot.detailErrors，由收集器最后决定退出码。
+//
+// 英雄榜与阵容成员（2026-11-10 体验线要「英雄」标签有数据）：站上没有英雄榜接口，这里从详情里的棋子出场率
+// 加权汇总出来——所以只有抓了详情的窗口（默认 7 天）才有 kind: 'hero' 的行和阵容成员，1/3 天窗口没有。
+//   权重 = 该「棋手 × 阵容」占全部样本的份额（全表的 sampleShare）；英雄出场率 = Σ 份额 × 该棋子在这对里的出场率，
+//   即「全部对局里有多少场上了这个棋子」；登顶率 / 前三率 / 平均名次 = 这个棋子上场的那些「棋手 × 阵容」的
+//   对应指标，按（份额 × 出场率）加权。count 拿不到，null。
 
 import type { SourceAdapter, Snapshot, StatRow, LineupRow, Window, LordLineupRow, LordLineupDetail } from './types'
 
@@ -230,6 +236,88 @@ function buildLordLineupDetail(d: LordLineupDetailApi): LordLineupDetail {
   }
 }
 
+/** 详情按（棋手×阵容）对上全表行拿权重；对不上（全表没这一行）按 0 权重忽略 */
+function detailWeights(details: LordLineupDetail[], rows: LordLineupRow[]): { d: LordLineupDetail; w: number; row: LordLineupRow | undefined }[] {
+  const byKey = new Map(rows.map((r) => [`${r.lordId}|${r.lineupId}`, r]))
+  return details.map((d) => {
+    const row = byKey.get(`${d.lordId}|${d.lineupId}`)
+    return { d, w: row?.appearanceRate ?? 0, row }
+  })
+}
+
+const round4 = (x: number) => Math.round(x * 10000) / 10000
+
+/**
+ * 从详情汇总英雄榜（kind: 'hero'）。纯函数，导出便于测试。
+ * 没有一条详情、或权重全为 0 → 空数组（别造一张全 0 的榜）。
+ */
+export function deriveHeroRows(details: LordLineupDetail[], rows: LordLineupRow[]): StatRow[] {
+  const items = detailWeights(details, rows).filter((x) => x.w > 0)
+  const totalW = items.reduce((n, x) => n + x.w, 0)
+  if (!totalW) return []
+  const acc = new Map<string, { appear: number; first: number; top3: number; place: number; placeW: number; aw: number; n: number }>()
+  for (const { d, w, row } of items) {
+    for (const h of d.heroes) {
+      if (h.appearRate == null) continue
+      const a = acc.get(h.name) ?? { appear: 0, first: 0, top3: 0, place: 0, placeW: 0, aw: 0, n: 0 }
+      const aw = w * h.appearRate
+      a.appear += aw
+      a.aw += aw
+      a.first += aw * (d.firstRate ?? row?.firstRate ?? 0)
+      a.top3 += aw * (d.top3Rate ?? row?.top3Rate ?? 0)
+      if (row?.avgPlacement != null) { a.place += aw * row.avgPlacement; a.placeW += aw }
+      a.n++
+      acc.set(h.name, a)
+    }
+  }
+  const out: StatRow[] = []
+  for (const [name, a] of acc) {
+    if (!a.aw) continue
+    out.push({
+      kind: 'hero',
+      sourceId: `hero:${name}`,          // 站上没有英雄 id，用名字当 id
+      name,
+      appearanceRate: round4(a.appear / totalW),
+      firstRate: round4(a.first / a.aw),
+      top3Rate: round4(a.top3 / a.aw),
+      avgPlacement: a.placeW ? round4(a.place / a.placeW) : null,
+      count: null,
+      raw: { derivedFrom: 'lord-lineup-details', pairs: a.n },   // 不是站上原始行：标明是从几对棋手×阵容详情汇总的
+    })
+  }
+  return out.sort((x, y) => (y.appearanceRate ?? 0) - (x.appearanceRate ?? 0))
+}
+
+/** 阵容成员里只留加权出场率不低于这个值的棋子（9 个人里最后几个是 20–40% 的可选位，不算成员） */
+const MEMBER_MIN_APPEAR = 0.5
+
+/**
+ * 从详情汇总每套阵容（按站上阵容名）的成员：各棋手版本按份额加权的棋子出场率 ≥ MEMBER_MIN_APPEAR 的留下，按出场率降序。
+ * 返回 阵容名 → 成员；没详情的阵容不在结果里（调用方保持 members 为 null）。
+ */
+export function deriveLineupMembers(details: LordLineupDetail[], rows: LordLineupRow[]): Map<string, NonNullable<LineupRow['members']>> {
+  const byLineup = new Map<string, { d: LordLineupDetail; w: number }[]>()
+  for (const x of detailWeights(details, rows)) {
+    const arr = byLineup.get(x.d.lineupName)
+    const item = { d: x.d, w: x.w > 0 ? x.w : 1e-9 }
+    if (arr) arr.push(item)
+    else byLineup.set(x.d.lineupName, [item])
+  }
+  const out = new Map<string, NonNullable<LineupRow['members']>>()
+  for (const [name, items] of byLineup) {
+    const totalW = items.reduce((n, x) => n + x.w, 0)
+    const appear = new Map<string, number>()
+    for (const x of items) for (const h of x.d.heroes) appear.set(h.name, (appear.get(h.name) ?? 0) + x.w * (h.appearRate ?? 0))
+    const members = [...appear]
+      .map(([hero, v]) => ({ hero, rate: v / totalW }))
+      .filter((m) => m.rate >= MEMBER_MIN_APPEAR)
+      .sort((a, b) => b.rate - a.rate)
+      .map((m) => ({ heroId: m.hero, heroName: m.hero }))
+    if (members.length) out.set(name, members)
+  }
+  return out
+}
+
 function buildWindow(days: 1 | 3 | 7, segmentKey: string, windowMeta: WindowMeta): Window {
   return {
     source: 'wxq666',
@@ -274,12 +362,22 @@ async function fetchWindow(days: 1 | 3 | 7, segmentKey: string, fetchFn: typeof 
     }
   }
 
+  const lordLineupRows = lordLineups.data.map(buildLordLineupRow)
+  const stats = lords.data.map(buildStatRow)
+  const lineupRows = lineups.data.map(buildLineupRow)
+  if (withDetails && details.length) {
+    // 英雄榜与阵容成员都从详情汇总（站上没有这两样的接口）
+    stats.push(...deriveHeroRows(details, lordLineupRows))
+    const members = deriveLineupMembers(details, lordLineupRows)
+    for (const l of lineupRows) l.members = members.get(l.name) ?? null
+  }
+
   return {
     window: buildWindow(days, segmentKey, lords.meta),
-    stats: lords.data.map(buildStatRow),
-    lineups: lineups.data.map(buildLineupRow),
+    stats,
+    lineups: lineupRows,
     meta: lords.meta,
-    lordLineups: lordLineups.data.map(buildLordLineupRow),
+    lordLineups: lordLineupRows,
     ...(withDetails ? { lordLineupDetails: details } : {}),
     ...(detailErrors.length ? { detailErrors } : {}),
   }
