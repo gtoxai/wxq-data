@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-11-09T17:38:23.386Z",
+  "generatedAt": "2026-11-09T18:30:32.318Z",
   "latest": "2026-11-10",
   "days": [
     {
       "date": "2026-11-10",
-      "generatedAt": "2026-11-09T17:38:23.386Z",
+      "generatedAt": "2026-11-09T18:30:32.318Z",
       "sources": [
         "wxq666"
       ],
@@ -18,7 +18,7 @@
         "king-5000"
       ],
       "snapshots": 6,
-      "rows": 126,
+      "rows": 286,
       "lineups": 247,
       "lordLineups": 766,
       "details": 298,
