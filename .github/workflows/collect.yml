@@ -1,0 +1,47 @@
+# 每天收集一次公共统计快照并提交进本仓。
+# 时间：UTC 22:00 = 北京 06:00（来源站的日榜此时已经更新完）。也可以在 Actions 页手动触发。
+# 失败策略：收集器任何来源抓失败都非零退出，让这次运行变红——不吞错。
+name: collect
+
+on:
+  schedule:
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 同一时刻只跑一个，避免两次运行互相 push 冲突
+concurrency: collect
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: collector/package-lock.json
+
+      - name: 装收集器依赖
+        run: npm ci
+        working-directory: collector
+
+      - name: 收集，写到仓根（snapshots/、latest.json、index.json）
+        run: npx tsx sync/stats.ts --out "$GITHUB_WORKSPACE"
+        working-directory: collector
+
+      - name: 有变化才提交
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add snapshots latest.json index.json
+          if git diff --cached --quiet; then
+            echo "数据没有变化，不提交"
+            exit 0
+          fi
+          git commit -m "数据：$(TZ=Asia/Shanghai date +%F) 快照（自动收集）"
+          git push

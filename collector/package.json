@@ -1,0 +1,13 @@
+{
+  "name": "wxq-data-collector",
+  "private": true,
+  "type": "module",
+  "description": "王者万象棋公共统计快照收集器（运行副本，源码在 wxq-helper 的 sync/）",
+  "scripts": {
+    "collect": "tsx sync/stats.ts --out .."
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "~5.8.3"
+  }
+}
