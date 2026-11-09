@@ -1,6 +1,7 @@
 # 每天收集一次公共统计快照并提交进本仓。
 # 时间：UTC 22:00 = 北京 06:00（来源站的日榜此时已经更新完）。也可以在 Actions 页手动触发。
-# 失败策略：收集器任何来源抓失败都非零退出，让这次运行变红——不吞错。
+# 失败策略：收集器任何来源抓失败、或任何一条详情抓失败，都非零退出让这次运行变红——不吞错；
+# 但提交步骤 if: always()，已经写出的数据照样进仓。
 name: collect
 
 on:
@@ -34,7 +35,9 @@ jobs:
         run: npx tsx sync/stats.ts --out "$GITHUB_WORKSPACE"
         working-directory: collector
 
+      # 收集器就算有部分详情抓失败（退出码非零、本次运行标红），已写出的数据也要提交——不让一条失败丢掉整天
       - name: 有变化才提交
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

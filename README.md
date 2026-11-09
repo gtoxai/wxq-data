@@ -5,14 +5,16 @@
 
 - **更新时间**：每天北京时间 06:00 左右（GitHub Actions 定时任务，UTC 22:00）。
 - **来源**：[wxq666.top](https://wxq666.top) 的公开接口（`/api/v1/meta`、`/lords`、`/lineups`）。
-- **收集方式**：仓内 `collector/` 的脚本，每次只打 13 个请求（1 个 meta + 2 段位 × 3 窗口 × 2 榜），请求之间间隔 300 毫秒。
+- **收集方式**：仓内 `collector/` 的脚本，每次约 330 个请求（1 个 meta + 2 段位 × 3 窗口 × 3 张表，再加 7 天窗口两个段位约 310 条「棋手 × 阵容」详情），请求之间间隔 300 毫秒，一次约 3 分钟。
 
 ## 文件结构
 
 ```
-latest.json                  最新一天的全部快照（平时只需要拉这一个）
-index.json                   有哪些日期、每天的来源 / 窗口 / 段位 / 行数、生成时间
-snapshots/YYYY-MM-DD.json    每天一个文件（北京日期），历史曲线按需拉
+latest.json                       最新一天的全部快照：棋手榜、阵容榜、棋手×阵容全表（榜单类消费者只需要这一个，约 500KB）
+latest-details.json               最新一天的棋手×阵容详情（7 天窗口两个段位约 300 条，约 2MB；只在要看成员/成型/对阵时拉）
+index.json                        有哪些日期、每天的来源 / 窗口 / 段位 / 行数 / 详情条数、生成时间
+snapshots/YYYY-MM-DD.json         每天一个文件（北京日期），历史曲线按需拉
+snapshots/YYYY-MM-DD.details.json 对应那天的详情
 collector/                   收集器（运行副本；源码在 wxq-helper 的 sync/，改动两边同步）
 .github/workflows/collect.yml  定时任务
 ```
@@ -28,7 +30,8 @@ collector/                   收集器（运行副本；源码在 wxq-helper 的
       "window": { "source": "wxq666", "windowDays": 7, "segment": "king-1000", "version": "daily-…", "gameType": "wanxiang", "fetchedAt": "…", "dateStart": "…", "dateEnd": "…" },
       "stats":   [ { "kind": "player", "sourceId": "lord-…", "name": "…", "appearanceRate": 0.12, "firstRate": 0.18, "top3Rate": 0.43, "avgPlacement": 3.68, "count": null, "raw": { /* 来源原始对象 */ } } ],
       "lineups": [ { "sourceId": "…", "name": "…", "camps": ["…"], "appearanceRate": 0.1, "firstRate": 0.1, "top3Rate": 0.3, "avgPlacement": 4.1, "count": null, "members": null, "raw": { } } ],
-      "meta":    { /* 来源这次窗口的统计信息：样本量、阈值、起止日… 原样保留 */ }
+      "meta":    { /* 来源这次窗口的统计信息：样本量、阈值、起止日… 原样保留 */ },
+      "lordLineups": [ { "lordId": "lord-…", "lordName": "…", "lineupId": "static-…", "lineupName": "…", "camps": ["…"], "appearanceRate": 0.038, "firstRate": 0.196, "top3Rate": 0.548, "avgPlacement": 3.33, "raw": { } } ]
     }
   ]
 }
@@ -36,6 +39,30 @@ collector/                   收集器（运行副本；源码在 wxq-helper 的
 
 百分比字段统一换成 0–1 的小数；来源没有「场次」字段，`count` 为 `null`。
 完整类型定义见 `collector/sync/sources/types.ts`。
+
+### `latest-details.json` / `snapshots/*.details.json` 的形状
+
+```jsonc
+{
+  "date": "2026-11-10", "generatedAt": "…",
+  "details": [                       // 一个窗口一块，用 window 和 latest.json 里的快照对上；目前只有 7 天窗口的两个段位
+    { "window": { "source": "wxq666", "windowDays": 7, "segment": "king-1000", /* … */ },
+      "lordLineupDetails": [          // 每对棋手×阵容一条，率 0–1
+        { "lordId": "lord-…", "lordName": "昭君", "lineupId": "static-…", "lineupName": "昭君五阶", "camps": ["无阵营"],
+          "share": 0.637,             // 这套阵容占该棋手全部对局的比例
+          "firstRate": 0.196, "top3Rate": 0.548,
+          "formedRate": 0.712, "formationRound": 10.6, "finalTopLevel": 212.2, "maxRoundUseCards": 17.3,
+          "coreHeroes": ["姜子牙", "杨玉环", "海月"],
+          "matchups": [ { "opponent": "猪马鹿", "leadRate": 0.703 } ],
+          "heroes":   [ { "name": "海月", "appearRate": 0.909, "finalRate": 0.903, "avgLevel": 135, "mvpRate": 0.233,
+                          "topEquipment": [ { "name": "不死鸟之眼", "n": 12318, "top1Rate": 0.265, "top3Rate": 0.65 } ] } ],
+          "talents":  [ { "name": "战略中枢", "usageRate": 0.136, "top1Rate": 0.241, "top3Rate": 0.596, "n": 1086 } ] } ],
+      "detailErrors": [ /* 可选：这天抓失败的条目，有它说明详情不全 */ ] }
+  ]
+}
+```
+
+详情**不保留来源的原始对象**（图标、描述、至高决策等），原始单条 73KB、一天 22MB 存不起；字段取舍见 `collector/sync/sources/types.ts`。
 
 ### `index.json` 的形状
 

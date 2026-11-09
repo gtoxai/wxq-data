@@ -7,103 +7,25 @@
 //      同一天再跑一次就覆盖那一天的，不同天的追加。
 //   2) --out <目录>（数据仓用，GitHub Actions 每天跑一次）：npx tsx sync/stats.ts --out ~/repos/wxq-data
 //      每天一个文件，目录结构：
-//        snapshots/YYYY-MM-DD.json   当天全部快照（{ date, generatedAt, snapshots }）
-//        latest.json                 最新一天那份（同一形状，客户端平时只拉这一个）
-//        index.json                  有哪些日期、每天的来源/窗口/段位/行数、生成时间（画 30 天曲线时先拉它）
-//      日期用北京自然日；同一天重复跑会和当天已有文件合并（同键覆盖），不会产生第二份。
+//        snapshots/YYYY-MM-DD.json           当天全部快照（{ date, generatedAt, snapshots }），**不含**棋手×阵容详情
+//        snapshots/YYYY-MM-DD.details.json   当天的棋手×阵容详情（{ date, generatedAt, details: [{ window, lordLineupDetails }] }）
+//        latest.json / latest-details.json   最新一天的上面两份（客户端数据页只拉前者，选将页才拉后者）
+//        index.json                          有哪些日期、每天的来源/窗口/段位/行数、生成时间（画 30 天曲线时先拉它）
+//      为什么拆两份：详情一天约 2MB（装备、天赋明细），榜单只有 100 多 KB；数据页每次打开都要榜单、从不看详情，
+//      放一起会让它白拉十几倍的数据。日期用北京自然日；同一天重复跑会和当天已有文件合并（同键覆盖），不会产生第二份。
 //
 // 这个文件被复制到公开数据仓 gtoxai/wxq-data 的 collector/ 下独立运行，所以它只许依赖
-// sync/sources/{types,index,wxq666}.ts 和 tsx，不许 import 本仓其它东西。改动请两边同步。
+// sync/dayfile.ts、sync/sources/{types,index,wxq666}.ts 和 tsx，不许 import 本仓其它东西。改动请两边同步。
 import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { adapters } from './sources/index.ts'
 import type { Snapshot } from './sources/types.ts'
+import { beijingDate, merge, groupByDay, splitDetails, windowKey, buildIndex, type DayFile, type DetailsFile } from './dayfile.ts'
+
+// 纯逻辑住在 dayfile.ts（浏览器端也要用）；这里转一手导出，测试和老引用不用改
+export * from './dayfile.ts'
 
 const DEV_OUT = join(import.meta.dirname, '..', 'public', 'data', 'stats-snapshot.json')
-
-/** 北京自然日（YYYY-MM-DD） */
-export function beijingDate(iso: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
-}
-
-/** 去重键：来源 × 窗口天数 × 段位 × 玩法 × 北京日期 */
-const keyOf = (s: Snapshot) => [s.window.source, s.window.windowDays, s.window.segment ?? '', s.window.gameType, beijingDate(s.window.fetchedAt)].join('|')
-
-/** 合并：新快照覆盖同键旧快照，其余保留；按抓取时间排序 */
-export function merge(existing: Snapshot[], fresh: Snapshot[]): Snapshot[] {
-  const map = new Map(existing.map((s) => [keyOf(s), s]))
-  for (const s of fresh) map.set(keyOf(s), s)
-  return [...map.values()].sort((a, b) => a.window.fetchedAt.localeCompare(b.window.fetchedAt))
-}
-
-/** 按北京日期分桶 */
-export function groupByDay(snaps: Snapshot[]): Map<string, Snapshot[]> {
-  const out = new Map<string, Snapshot[]>()
-  for (const s of snaps) {
-    const d = beijingDate(s.window.fetchedAt)
-    const arr = out.get(d)
-    if (arr) arr.push(s)
-    else out.set(d, [s])
-  }
-  return out
-}
-
-// ======================= 数据仓文件形状 =======================
-
-/** snapshots/YYYY-MM-DD.json 与 latest.json 的形状 */
-export interface DayFile {
-  /** 北京日期 YYYY-MM-DD */
-  date: string
-  /** 这份文件最后一次生成的时刻（ISO）。客户端「数据更新于」显示的就是它 */
-  generatedAt: string
-  snapshots: Snapshot[]
-}
-
-/** index.json 里每一天的概要 */
-export interface IndexDay {
-  date: string
-  generatedAt: string
-  /** 这天有哪些来源 / 窗口 / 段位 */
-  sources: string[]
-  windows: number[]
-  segments: string[]
-  /** 快照个数、榜单行数、阵容条数 */
-  snapshots: number
-  rows: number
-  lineups: number
-  /** 相对数据仓根的路径，客户端直接拼 raw 地址拉 */
-  file: string
-}
-
-/** index.json 的形状 */
-export interface IndexFile {
-  /** index 本身的生成时刻 */
-  generatedAt: string
-  /** 最新一天的日期（= latest.json 的 date）；一个都没有时 null */
-  latest: string | null
-  /** 按日期升序 */
-  days: IndexDay[]
-}
-
-const uniqSorted = <T,>(xs: T[]) => [...new Set(xs)].sort()
-
-/** 从一组 DayFile 生成 index（纯函数，便于测试） */
-export function buildIndex(dayFiles: DayFile[], generatedAt: string): IndexFile {
-  const days: IndexDay[] = dayFiles
-    .map((f) => ({
-      date: f.date,
-      generatedAt: f.generatedAt,
-      sources: uniqSorted(f.snapshots.map((s) => s.window.source)),
-      windows: uniqSorted(f.snapshots.map((s) => s.window.windowDays)),
-      segments: uniqSorted(f.snapshots.map((s) => s.window.segment).filter((x): x is string => x != null)),
-      snapshots: f.snapshots.length,
-      rows: f.snapshots.reduce((n, s) => n + s.stats.length, 0),
-      lineups: f.snapshots.reduce((n, s) => n + s.lineups.length, 0),
-      file: `snapshots/${f.date}.json`,
-    }))
-    .sort((a, b) => a.date.localeCompare(b.date))
-  return { generatedAt, latest: days.length ? days[days.length - 1].date : null, days }
-}
 
 function readJson<T>(path: string): T | null {
   return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as T) : null
@@ -119,21 +41,32 @@ export function writeRepo(root: string, fresh: Snapshot[], now = new Date().toIS
   const dir = join(root, 'snapshots')
   mkdirSync(dir, { recursive: true })
   const touched: string[] = []
-  for (const [date, snaps] of groupByDay(fresh)) {
+  for (const [date, daySnaps] of groupByDay(fresh)) {
+    const { snapshots, details } = splitDetails(daySnaps)
     const path = join(dir, `${date}.json`)
     const old = readJson<DayFile>(path)
-    const file: DayFile = { date, generatedAt: now, snapshots: merge(old?.snapshots ?? [], snaps) }
+    const file: DayFile = { date, generatedAt: now, snapshots: merge(old?.snapshots ?? [], snapshots) }
     writeFileSync(path, JSON.stringify(file))
+    if (details.length) {
+      // 详情同一天重跑：按窗口键覆盖
+      const dpath = join(dir, `${date}.details.json`)
+      const oldD = readJson<DetailsFile>(dpath)
+      const map = new Map((oldD?.details ?? []).map((d) => [windowKey(d.window), d]))
+      for (const d of details) map.set(windowKey(d.window), d)
+      const dfile: DetailsFile = { date, generatedAt: now, details: [...map.values()] }
+      writeFileSync(dpath, JSON.stringify(dfile))
+    }
     touched.push(date)
   }
-  const all = readdirSync(dir)
-    .filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
-    .map((f) => readJson<DayFile>(join(dir, f))!)
-  const index = buildIndex(all, now)
+  const names = readdirSync(dir)
+  const all = names.filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).map((f) => readJson<DayFile>(join(dir, f))!)
+  const allDetails = names.filter((f) => /^\d{4}-\d{2}-\d{2}\.details\.json$/.test(f)).map((f) => readJson<DetailsFile>(join(dir, f))!)
+  const index = buildIndex(all, now, allDetails)
   writeFileSync(join(root, 'index.json'), JSON.stringify(index, null, 2))
   if (index.latest) {
-    const latest = all.find((f) => f.date === index.latest)!
-    writeFileSync(join(root, 'latest.json'), JSON.stringify(latest))
+    writeFileSync(join(root, 'latest.json'), JSON.stringify(all.find((f) => f.date === index.latest)!))
+    const latestDetails = allDetails.find((f) => f.date === index.latest)
+    if (latestDetails) writeFileSync(join(root, 'latest-details.json'), JSON.stringify(latestDetails))
   }
   return touched
 }
@@ -155,7 +88,14 @@ async function collect(): Promise<{ fresh: Snapshot[]; failures: string[] }> {
     try {
       const snaps = await a.fetchAll()
       fresh.push(...snaps)
-      console.log(`${a.source}：${snaps.length} 个快照，${snaps.reduce((n, s) => n + s.stats.length, 0)} 行，${snaps.reduce((n, s) => n + s.lineups.length, 0)} 条阵容`)
+      const sum = (f: (s: Snapshot) => number) => snaps.reduce((n, s) => n + f(s), 0)
+      console.log(
+        `${a.source}：${snaps.length} 个快照，${sum((s) => s.stats.length)} 行，${sum((s) => s.lineups.length)} 条阵容，` +
+          `${sum((s) => s.lordLineups?.length ?? 0)} 行棋手×阵容，${sum((s) => s.lordLineupDetails?.length ?? 0)} 条详情`,
+      )
+      // 详情单条失败：数据已经在快照里（缺那几条），这里只汇总成失败项，让最后退出码非零
+      const detailErrors = snaps.flatMap((s) => s.detailErrors ?? [])
+      if (detailErrors.length) failures.push(`${a.source}：${detailErrors.length} 条详情抓取失败（数据已写出、缺这些条）\n    ` + detailErrors.join('\n    '))
     } catch (e) {
       failures.push(`${a.source}：${(e as Error).message}`)
     }
@@ -181,7 +121,8 @@ async function main() {
     console.log(`写入 ${DEV_OUT}：共 ${merged.length} 个快照，覆盖 ${groupByDay(merged).size} 天`)
   }
 
-  // 失败不吞：有来源失败就非零退出，让定时任务变红
+  // 失败不吞：有来源整个失败、或有详情条目失败，都非零退出让定时任务变红——但数据在上面已经写出，
+  // 工作流的提交步骤用 if: always() 把写出的部分照样提交，不让一条详情失败丢掉整天
   if (failures.length) {
     console.error('失败的来源：\n  ' + failures.join('\n  '))
     process.exit(1)
