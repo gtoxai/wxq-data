@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-13T02:26:22.555Z",
-  "latest": "2026-11-13",
+  "generatedAt": "2026-11-14T02:01:20.504Z",
+  "latest": "2026-11-14",
   "days": [
     {
       "date": "2026-11-10",
@@ -93,6 +93,29 @@
       "details": 290,
       "file": "snapshots/2026-11-13.json",
       "detailsFile": "snapshots/2026-11-13.details.json"
+    },
+    {
+      "date": "2026-11-14",
+      "generatedAt": "2026-11-14T02:01:20.504Z",
+      "sources": [
+        "wxq666"
+      ],
+      "windows": [
+        1,
+        3,
+        7
+      ],
+      "segments": [
+        "king-1000",
+        "king-5000"
+      ],
+      "snapshots": 6,
+      "rows": 285,
+      "lineups": 238,
+      "lordLineups": 624,
+      "details": 270,
+      "file": "snapshots/2026-11-14.json",
+      "detailsFile": "snapshots/2026-11-14.details.json"
     }
   ]
 }
